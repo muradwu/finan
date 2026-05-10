@@ -21,8 +21,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "AI не смог распарсить текст" }, { status: 422 })
     }
     console.error(err)
-    const msg = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ error: "Ошибка AI-обработки", detail: msg }, { status: 500 })
+    return NextResponse.json({ error: "Ошибка AI-обработки" }, { status: 500 })
   }
 }
 
