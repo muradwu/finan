@@ -1,0 +1,55 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Category {
+  food
+  transport
+  housing
+  entertainment
+  health
+  work
+  subscriptions
+  shopping
+  education
+  other
+}
+
+enum TransactionType {
+  expense
+  income
+}
+
+model Transaction {
+  id          String          @id @default(cuid())
+  amount      Float
+  currency    String          @default("AZN")
+  category    Category
+  description String
+  date        DateTime
+  type        TransactionType
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+}
+
+model Settings {
+  id            String   @id @default(cuid())
+  monthlyBudget Float    @default(1500)
+  currency      String   @default("AZN")
+  theme         String   @default("system")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model AICorrection {
+  id              String   @id @default(cuid())
+  originalText    String
+  aiResult        Json
+  correctedResult Json
+  createdAt       DateTime @default(now())
+}
