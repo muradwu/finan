@@ -61,14 +61,22 @@ export async function parseTransaction(text: string): Promise<{
   return JSON.parse(cleaned)
 }
 
-export async function parseReceiptImage(base64Image: string): Promise<{
-  amount: number
-  currency: string
-  category: string
+export interface ReceiptItem {
   description: string
+  amount: number
+  category: string
+}
+
+export interface ReceiptAnalysis {
+  receiptType: string
+  merchant: string
   date: string
-  type: "expense" | "income"
-}> {
+  currency: string
+  totalAmount: number
+  items: ReceiptItem[]
+}
+
+export async function parseReceiptImageDetailed(base64Image: string): Promise<ReceiptAnalysis> {
   const today = new Date().toISOString().split("T")[0]
 
   const response = await openai.chat.completions.create({
@@ -83,34 +91,40 @@ export async function parseReceiptImage(base64Image: string): Promise<{
           },
           {
             type: "text",
-            text: `Это фото чека или квитанции. Текст может быть на азербайджанском, русском или английском языке. Извлеки данные о покупке и верни ТОЛЬКО JSON без markdown и без пояснений.
+            text: `Ты анализируешь фото чека или квитанции. Текст может быть на азербайджанском, русском или английском языке.
+Верни ТОЛЬКО JSON без markdown и без пояснений.
 
 Сегодня: ${today}
 
-Формат ответа (строго JSON):
+Формат ответа:
 {
-  "amount": number (итоговая сумма к оплате, только число),
-  "currency": "AZN" | "USD" | "EUR",
-  "category": "food"|"transport"|"housing"|"entertainment"|"health"|"work"|"subscriptions"|"shopping"|"education"|"other",
-  "description": "краткое описание на русском (магазин/заведение и что куплено)",
+  "receiptType": "тип заведения на русском: Продуктовый магазин | Ресторан | Кафе | Аптека | Одежда и обувь | АЗС | Транспорт | Другое",
+  "merchant": "название магазина или заведения с чека",
   "date": "YYYY-MM-DD",
-  "type": "expense"
+  "currency": "AZN" | "USD" | "EUR",
+  "totalAmount": число (итоговая сумма — ищи CƏMİ / CƏMI / YEKUN / TOTAL / ИТОГО),
+  "items": [
+    {
+      "description": "название позиции или группы товаров на русском",
+      "amount": число,
+      "category": "food"|"transport"|"housing"|"entertainment"|"health"|"work"|"subscriptions"|"shopping"|"education"|"other"
+    }
+  ]
 }
 
-Правила:
-- amount = ищи слова: CƏMİ, CƏMI, YEKUN, TOTAL, ИТОГО, JƏMI — это итоговая сумма
-- Если сумма написана как "12.50" или "12,50" — это 12.50
-- Если валюта не ясна — "AZN" (Азербайджан)
+Правила для items:
+- Читай каждую строку чека и создавай отдельный item для каждой позиции (или группируй очень похожие)
+- Если позиции нечитаемы — создай 1 item с описанием магазина и суммой totalAmount
+- Максимум 15 items, минимум 1
+- Категории: еда/продукты/напитки → food, лекарства/аптека → health, одежда/обувь/техника → shopping, такси/транспорт → transport, кафе/ресторан (готовая еда) → food или entertainment
+- Суммы items должны суммироваться в totalAmount (±5%)
 - Если дата не видна — ${today}
-- Кафе/ресторан/supermarket/market → food, aptek/аптека → health, geyim/одежда → shopping, taksi/такси → transport
-- description = название магазина/заведения + что куплено (на русском)
-- type всегда "expense"
-- Если не можешь прочитать сумму — используй наибольшее видимое число на чеке`,
+- Если валюта не ясна — "AZN"`,
           },
         ],
       },
     ],
-    max_tokens: 500,
+    max_tokens: 1200,
   })
 
   const content = response.choices[0]?.message?.content ?? ""

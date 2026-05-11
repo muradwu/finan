@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { motion, AnimatePresence } from "framer-motion"
-import { Loader2, Sparkles, AlertCircle, Check, Camera, X } from "lucide-react"
+import { Loader2, Sparkles, AlertCircle, Check, Camera } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,7 @@ import { AmountDisplay } from "@/components/shared/AmountDisplay"
 import { CATEGORY_OPTIONS, CategoryKey } from "@/lib/categories"
 import { transactionSchema, TransactionFormValues } from "../schema"
 import { formatDate } from "@/lib/formatters"
+import type { ReceiptAnalysis } from "@/lib/openai"
 
 interface QuickAddModalProps {
   open: boolean
@@ -28,7 +29,7 @@ interface Account { id: string; name: string; type: string }
 
 export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
   const [aiText, setAiText] = useState("")
-  const [aiState, setAiState] = useState<"idle" | "loading" | "preview" | "error">("idle")
+  const [aiState, setAiState] = useState<"idle" | "loading" | "preview" | "receipt-analysis" | "error">("idle")
   const [parsed, setParsed] = useState<ParsedData | null>(null)
   const [originalText, setOriginalText] = useState("")
   const [slowTimeout, setSlowTimeout] = useState(false)
@@ -36,6 +37,9 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
   const [selectedAccountId, setSelectedAccountId] = useState<string>("")
   const [receiptPreview, setReceiptPreview] = useState<string>("")
   const [receiptLoading, setReceiptLoading] = useState(false)
+  const [receiptData, setReceiptData] = useState<ReceiptAnalysis | null>(null)
+  const [selectedItems, setSelectedItems] = useState<boolean[]>([])
+  const [isAddingItems, setIsAddingItems] = useState(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const inputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -110,13 +114,14 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
     setReceiptLoading(true)
     setAiState("loading")
     setSlowTimeout(false)
+    timeoutRef.current = setTimeout(() => setSlowTimeout(true), 5000)
 
     try {
       const base64 = await new Promise<string>((resolve, reject) => {
         const canvas = document.createElement("canvas")
         const img = new Image()
         img.onload = () => {
-          const maxSize = 1024
+          const maxSize = 1600
           let { width, height } = img
           if (width > maxSize || height > maxSize) {
             if (width > height) { height = Math.round((height * maxSize) / width); width = maxSize }
@@ -124,7 +129,7 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
           }
           canvas.width = width; canvas.height = height
           canvas.getContext("2d")?.drawImage(img, 0, 0, width, height)
-          resolve(canvas.toDataURL("image/jpeg", 0.85))
+          resolve(canvas.toDataURL("image/jpeg", 0.92))
         }
         img.onerror = reject
         img.src = URL.createObjectURL(file)
@@ -138,30 +143,66 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
         body: JSON.stringify({ image: base64 }),
       })
 
+      clearTimeout(timeoutRef.current)
+
       if (!res.ok) throw new Error("Receipt parse failed")
-      const data = await res.json()
+      const data: ReceiptAnalysis = await res.json()
 
-      const parsedData: ParsedData = {
-        amount: data.amount,
-        currency: data.currency ?? "AZN",
-        category: data.category,
-        description: data.description,
-        date: data.date ?? new Date().toISOString().split("T")[0],
-        type: data.type,
-        _parsed: true,
-      }
-
-      setParsed(parsedData)
-      Object.entries(parsedData).forEach(([key, val]) => {
-        if (key !== "_parsed") setValue(key as keyof TransactionFormValues, val as string)
-      })
-      setAiState("preview")
+      setReceiptData(data)
+      setSelectedItems(data.items.map(() => true))
+      setAiState("receipt-analysis")
     } catch {
+      clearTimeout(timeoutRef.current)
       setAiState("error")
       toast.error("Не удалось распознать чек. Заполните форму вручную.")
     } finally {
       setReceiptLoading(false)
       if (fileInputRef.current) fileInputRef.current.value = ""
+    }
+  }
+
+  const toggleItem = (index: number) => {
+    setSelectedItems(prev => prev.map((v, i) => i === index ? !v : v))
+  }
+
+  const handleAddSelected = async () => {
+    if (!receiptData) return
+    const itemsToAdd = receiptData.items.filter((_, i) => selectedItems[i])
+    if (itemsToAdd.length === 0) return
+
+    setIsAddingItems(true)
+    try {
+      const results = await Promise.allSettled(
+        itemsToAdd.map(item =>
+          fetch("/api/transactions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              amount: item.amount,
+              currency: receiptData.currency,
+              category: item.category,
+              description: item.description,
+              date: receiptData.date,
+              type: "expense",
+              ...(selectedAccountId ? { accountId: selectedAccountId } : {}),
+            }),
+          })
+        )
+      )
+
+      const succeeded = results.filter(r => r.status === "fulfilled").length
+      if (succeeded > 0) {
+        toast.success(
+          succeeded === 1 ? "Транзакция добавлена" : `Добавлено транзакций: ${succeeded}`,
+          { description: `${receiptData.merchant} · ${receiptData.receiptType}` }
+        )
+        handleClose()
+        window.dispatchEvent(new Event("transaction-added"))
+      } else {
+        toast.error("Не удалось сохранить транзакции")
+      }
+    } finally {
+      setIsAddingItems(false)
     }
   }
 
@@ -203,10 +244,42 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
     setParsed(null)
     setSlowTimeout(false)
     setSelectedAccountId("")
+    setReceiptPreview("")
+    setReceiptData(null)
+    setSelectedItems([])
     clearTimeout(timeoutRef.current)
     reset()
     onClose()
   }
+
+  const selectedCount = selectedItems.filter(Boolean).length
+  const selectedTotal = receiptData
+    ? receiptData.items.filter((_, i) => selectedItems[i]).reduce((sum, item) => sum + item.amount, 0)
+    : 0
+
+  const AccountSelector = ({ id }: { id: string }) => (
+    <div className="space-y-1">
+      <Label htmlFor={id}>Счёт <span className="text-muted-foreground font-normal">(необязательно)</span></Label>
+      {accounts.length > 0 ? (
+        <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+          <SelectTrigger id={id}>
+            <SelectValue placeholder="Не указан" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">Не указан</SelectItem>
+            {accounts.map((acc) => (
+              <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Нет счетов.{" "}
+          <a href="/" className="underline text-primary" onClick={handleClose}>Добавить счёт</a>
+        </p>
+      )}
+    </div>
+  )
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
@@ -214,9 +287,9 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
         <DialogTitle className="text-xl font-semibold">Добавить транзакцию</DialogTitle>
 
         <div className="space-y-4">
-          {/* AI Input */}
+          {/* AI Input — shown when idle / loading / error */}
           <AnimatePresence mode="wait">
-            {aiState !== "preview" ? (
+            {aiState !== "preview" && aiState !== "receipt-analysis" ? (
               <motion.div
                 key="ai-input"
                 initial={{ opacity: 0, y: -8 }}
@@ -249,7 +322,7 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
                     type="button"
                     variant="outline"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={aiState === "loading" || receiptLoading}
+                    disabled={aiState === "loading"}
                     className="shrink-0"
                     aria-label="Сфотографировать чек"
                   >
@@ -274,38 +347,23 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
                   </Button>
                 </div>
                 <p id="ai-hint" className="text-xs text-muted-foreground">
-                  Нажми Enter или кнопку — AI распознает сумму, категорию и дату
+                  Напиши или сфотографируй чек — AI распознает расходы
                 </p>
-
-                {receiptPreview && (
-                  <div className="relative w-16 h-16 rounded-md overflow-hidden border border-border">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={receiptPreview} alt="Чек" className="w-full h-full object-cover" />
-                    <button
-                      type="button"
-                      onClick={() => { setReceiptPreview(""); setAiState("idle") }}
-                      className="absolute top-0.5 right-0.5 bg-black/50 rounded-full p-0.5 text-white hover:bg-black/70"
-                      aria-label="Удалить фото"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
-                )}
 
                 {aiState === "loading" && slowTimeout && (
                   <p className="text-xs text-muted-foreground animate-pulse">
-                    Это занимает дольше обычного...
+                    Анализируем чек, это может занять несколько секунд...
                   </p>
                 )}
 
                 {aiState === "error" && (
                   <div className="flex items-center gap-2 text-sm text-destructive" role="alert">
                     <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
-                    AI не смог распознать. Заполни форму вручную ниже.
+                    Не удалось распознать. Заполни форму вручную ниже.
                   </div>
                 )}
               </motion.div>
-            ) : (
+            ) : aiState === "preview" ? (
               <motion.div
                 key="ai-preview"
                 initial={{ opacity: 0, scale: 0.96 }}
@@ -324,10 +382,106 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
                   Изменить
                 </Button>
               </motion.div>
+            ) : null}
+          </AnimatePresence>
+
+          {/* Receipt Analysis Screen */}
+          <AnimatePresence>
+            {aiState === "receipt-analysis" && receiptData && (
+              <motion.div
+                key="receipt-analysis"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25 }}
+                className="space-y-3"
+              >
+                {/* Header */}
+                <div className="flex items-center gap-3 p-3 rounded-xl border border-border bg-muted/30">
+                  {receiptPreview && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={receiptPreview}
+                      alt="Чек"
+                      className="w-10 h-14 object-cover rounded-md border border-border shrink-0"
+                    />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-sm truncate">{receiptData.merchant}</p>
+                    <p className="text-xs text-muted-foreground">{receiptData.receiptType}</p>
+                    <p className="text-xs text-muted-foreground">{formatDate(receiptData.date)}</p>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0 h-7 text-xs"
+                    onClick={() => { setAiState("idle"); setReceiptData(null); setReceiptPreview("") }}
+                  >
+                    Изменить
+                  </Button>
+                </div>
+
+                {/* Items checklist */}
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide px-0.5">
+                    Выбери позиции для добавления
+                  </p>
+                  {receiptData.items.map((item, i) => (
+                    <label
+                      key={i}
+                      className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors select-none ${
+                        selectedItems[i]
+                          ? "bg-primary/5 border-primary/30"
+                          : "border-border bg-transparent opacity-50"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedItems[i] ?? false}
+                        onChange={() => toggleItem(i)}
+                        className="w-4 h-4 shrink-0 accent-primary rounded"
+                      />
+                      <CategoryBadge category={item.category as CategoryKey} />
+                      <span className="text-sm flex-1 min-w-0 truncate">{item.description}</span>
+                      <span className="text-sm font-medium tabular-nums shrink-0 text-foreground">
+                        {item.amount.toFixed(2)} {receiptData.currency}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+
+                {/* Summary row */}
+                <div className="flex items-center justify-between px-1 py-1.5 border-t text-sm">
+                  <span className="text-muted-foreground">
+                    Выбрано: {selectedCount} из {receiptData.items.length}
+                  </span>
+                  <span className="font-semibold tabular-nums">
+                    {selectedTotal.toFixed(2)} {receiptData.currency}
+                  </span>
+                </div>
+
+                <AccountSelector id="account-select-receipt" />
+
+                <div className="flex gap-2 pt-1">
+                  <Button type="button" variant="outline" onClick={handleClose} className="flex-1">
+                    Отмена
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleAddSelected}
+                    disabled={selectedCount === 0 || isAddingItems}
+                    className="flex-1"
+                  >
+                    {isAddingItems
+                      ? <Loader2 className="h-4 w-4 animate-spin" />
+                      : `Добавить (${selectedCount})`
+                    }
+                  </Button>
+                </div>
+              </motion.div>
             )}
           </AnimatePresence>
 
-          {/* Preview / Manual Form */}
+          {/* Manual / Text-AI Form */}
           <AnimatePresence>
             {(aiState === "preview" || aiState === "error") && (
               <motion.form
@@ -428,29 +582,7 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
                   )}
                 </div>
 
-                <div className="space-y-1">
-                  <Label htmlFor="account-select">Счёт <span className="text-muted-foreground font-normal">(необязательно)</span></Label>
-                  {accounts.length > 0 ? (
-                    <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
-                      <SelectTrigger id="account-select">
-                        <SelectValue placeholder="Не указан" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="">Не указан</SelectItem>
-                        {accounts.map((acc) => (
-                          <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">
-                      Нет счетов.{" "}
-                      <a href="/" className="underline text-primary" onClick={handleClose}>
-                        Добавить счёт
-                      </a>
-                    </p>
-                  )}
-                </div>
+                <AccountSelector id="account-select" />
 
                 <div className="flex gap-2 pt-2">
                   <Button type="button" variant="outline" onClick={handleClose} className="flex-1">
