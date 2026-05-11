@@ -428,9 +428,9 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
                   )}
                 </div>
 
-                {accounts.length > 0 && (
-                  <div className="space-y-1">
-                    <Label htmlFor="account-select">Счёт <span className="text-muted-foreground font-normal">(необязательно)</span></Label>
+                <div className="space-y-1">
+                  <Label htmlFor="account-select">Счёт <span className="text-muted-foreground font-normal">(необязательно)</span></Label>
+                  {accounts.length > 0 ? (
                     <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
                       <SelectTrigger id="account-select">
                         <SelectValue placeholder="Не указан" />
@@ -442,8 +442,15 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
-                )}
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Нет счетов.{" "}
+                      <a href="/" className="underline text-primary" onClick={handleClose}>
+                        Добавить счёт
+                      </a>
+                    </p>
+                  )}
+                </div>
 
                 <div className="flex gap-2 pt-2">
                   <Button type="button" variant="outline" onClick={handleClose} className="flex-1">
