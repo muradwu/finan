@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { motion, AnimatePresence } from "framer-motion"
-import { Loader2, Sparkles, AlertCircle, Check, Camera } from "lucide-react"
+import { Loader2, Sparkles, AlertCircle, Check, Camera, Pencil } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -40,6 +40,8 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
   const [receiptData, setReceiptData] = useState<ReceiptAnalysis | null>(null)
   const [selectedItems, setSelectedItems] = useState<boolean[]>([])
   const [isAddingItems, setIsAddingItems] = useState(false)
+  const [editingIndex, setEditingIndex] = useState<number | null>(null)
+  const [editDraft, setEditDraft] = useState({ description: "", amount: "", category: "" })
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const inputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -165,6 +167,24 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
     setSelectedItems(prev => prev.map((v, i) => i === index ? !v : v))
   }
 
+  const startEdit = (i: number) => {
+    if (!receiptData) return
+    const item = receiptData.items[i]
+    setEditDraft({ description: item.description, amount: String(item.amount), category: item.category })
+    setEditingIndex(editingIndex === i ? null : i)
+  }
+
+  const saveEdit = () => {
+    if (editingIndex === null || !receiptData) return
+    const updatedItems = receiptData.items.map((item, i) =>
+      i === editingIndex
+        ? { ...item, description: editDraft.description, amount: parseFloat(editDraft.amount) || item.amount, category: editDraft.category }
+        : item
+    )
+    setReceiptData({ ...receiptData, items: updatedItems })
+    setEditingIndex(null)
+  }
+
   const handleAddSelected = async () => {
     if (!receiptData) return
     const itemsToAdd = receiptData.items.filter((_, i) => selectedItems[i])
@@ -247,6 +267,7 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
     setReceiptPreview("")
     setReceiptData(null)
     setSelectedItems([])
+    setEditingIndex(null)
     clearTimeout(timeoutRef.current)
     reset()
     onClose()
@@ -426,26 +447,83 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
                     Выбери позиции для добавления
                   </p>
                   {receiptData.items.map((item, i) => (
-                    <label
-                      key={i}
-                      className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors select-none ${
-                        selectedItems[i]
-                          ? "bg-primary/5 border-primary/30"
-                          : "border-border bg-transparent opacity-50"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedItems[i] ?? false}
-                        onChange={() => toggleItem(i)}
-                        className="w-4 h-4 shrink-0 accent-primary rounded"
-                      />
-                      <CategoryBadge category={item.category as CategoryKey} />
-                      <span className="text-sm flex-1 min-w-0 truncate">{item.description}</span>
-                      <span className="text-sm font-medium tabular-nums shrink-0 text-foreground">
-                        {item.amount.toFixed(2)} {receiptData.currency}
-                      </span>
-                    </label>
+                    <div key={i}>
+                      <div
+                        className={`flex items-center gap-2 p-2.5 rounded-lg border transition-colors ${
+                          selectedItems[i]
+                            ? "bg-primary/5 border-primary/30"
+                            : "border-border bg-transparent opacity-50"
+                        } ${editingIndex === i ? "rounded-b-none border-b-0" : ""}`}
+                      >
+                        <input
+                          type="checkbox"
+                          id={`item-${i}`}
+                          checked={selectedItems[i] ?? false}
+                          onChange={() => toggleItem(i)}
+                          className="w-4 h-4 shrink-0 accent-primary rounded cursor-pointer"
+                        />
+                        <label htmlFor={`item-${i}`} className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                          <CategoryBadge category={item.category as CategoryKey} />
+                          <span className="text-sm flex-1 min-w-0 truncate">{item.description}</span>
+                          <span className="text-sm font-medium tabular-nums shrink-0">
+                            {item.amount.toFixed(2)} {receiptData.currency}
+                          </span>
+                        </label>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className={`h-6 w-6 shrink-0 ${editingIndex === i ? "text-primary" : "text-muted-foreground"}`}
+                          onClick={() => startEdit(i)}
+                          aria-label="Редактировать позицию"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                      </div>
+
+                      {editingIndex === i && (
+                        <motion.div
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          className="p-3 rounded-b-lg border border-t-0 border-primary/30 bg-primary/5 space-y-2"
+                        >
+                          <Input
+                            value={editDraft.description}
+                            onChange={(e) => setEditDraft(d => ({ ...d, description: e.target.value }))}
+                            placeholder="Описание"
+                            className="h-8 text-sm"
+                          />
+                          <div className="flex gap-2">
+                            <Input
+                              type="number"
+                              value={editDraft.amount}
+                              onChange={(e) => setEditDraft(d => ({ ...d, amount: e.target.value }))}
+                              placeholder="Сумма"
+                              className="h-8 text-sm tabular-nums w-28 shrink-0"
+                              step="0.01"
+                            />
+                            <Select value={editDraft.category} onValueChange={(v) => setEditDraft(d => ({ ...d, category: v }))}>
+                              <SelectTrigger className="h-8 text-sm flex-1">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {CATEGORY_OPTIONS.map(opt => (
+                                  <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button type="button" size="sm" className="h-7 text-xs flex-1" onClick={saveEdit}>
+                              Сохранить
+                            </Button>
+                            <Button type="button" variant="outline" size="sm" className="h-7 text-xs flex-1" onClick={() => setEditingIndex(null)}>
+                              Отмена
+                            </Button>
+                          </div>
+                        </motion.div>
+                      )}
+                    </div>
                   ))}
                 </div>
 
