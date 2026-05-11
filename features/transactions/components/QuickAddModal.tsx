@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { motion, AnimatePresence } from "framer-motion"
-import { Loader2, Sparkles, AlertCircle, Check } from "lucide-react"
+import { Loader2, Sparkles, AlertCircle, Check, Camera, X } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -34,8 +34,11 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
   const [slowTimeout, setSlowTimeout] = useState(false)
   const [accounts, setAccounts] = useState<Account[]>([])
   const [selectedAccountId, setSelectedAccountId] = useState<string>("")
+  const [receiptPreview, setReceiptPreview] = useState<string>("")
+  const [receiptLoading, setReceiptLoading] = useState(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const inputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (open) {
@@ -97,6 +100,68 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
       clearTimeout(timeoutRef.current)
       clearTimeout(abortTimeout)
       setAiState("error")
+    }
+  }
+
+  const handleReceiptPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setReceiptLoading(true)
+    setAiState("loading")
+    setSlowTimeout(false)
+
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const canvas = document.createElement("canvas")
+        const img = new Image()
+        img.onload = () => {
+          const maxSize = 1024
+          let { width, height } = img
+          if (width > maxSize || height > maxSize) {
+            if (width > height) { height = Math.round((height * maxSize) / width); width = maxSize }
+            else { width = Math.round((width * maxSize) / height); height = maxSize }
+          }
+          canvas.width = width; canvas.height = height
+          canvas.getContext("2d")?.drawImage(img, 0, 0, width, height)
+          resolve(canvas.toDataURL("image/jpeg", 0.85))
+        }
+        img.onerror = reject
+        img.src = URL.createObjectURL(file)
+      })
+
+      setReceiptPreview(base64)
+
+      const res = await fetch("/api/transactions/parse-receipt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: base64 }),
+      })
+
+      if (!res.ok) throw new Error("Receipt parse failed")
+      const data = await res.json()
+
+      const parsedData: ParsedData = {
+        amount: data.amount,
+        currency: data.currency ?? "AZN",
+        category: data.category,
+        description: data.description,
+        date: data.date ?? new Date().toISOString().split("T")[0],
+        type: data.type,
+        _parsed: true,
+      }
+
+      setParsed(parsedData)
+      Object.entries(parsedData).forEach(([key, val]) => {
+        if (key !== "_parsed") setValue(key as keyof TransactionFormValues, val as string)
+      })
+      setAiState("preview")
+    } catch {
+      setAiState("error")
+      toast.error("Не удалось распознать чек. Заполните форму вручную.")
+    } finally {
+      setReceiptLoading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ""
     }
   }
 
@@ -172,6 +237,28 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
                     disabled={aiState === "loading"}
                     aria-describedby="ai-hint"
                   />
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={handleReceiptPhoto}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={aiState === "loading" || receiptLoading}
+                    className="shrink-0"
+                    aria-label="Сфотографировать чек"
+                  >
+                    {receiptLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Camera className="h-4 w-4" aria-hidden="true" />
+                    )}
+                  </Button>
                   <Button
                     type="button"
                     onClick={handleAIParse}
@@ -179,7 +266,7 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
                     className="shrink-0"
                     aria-label="Обработать AI"
                   >
-                    {aiState === "loading" ? (
+                    {aiState === "loading" && !receiptLoading ? (
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                     ) : (
                       <Sparkles className="h-4 w-4" aria-hidden="true" />
@@ -189,6 +276,21 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
                 <p id="ai-hint" className="text-xs text-muted-foreground">
                   Нажми Enter или кнопку — AI распознает сумму, категорию и дату
                 </p>
+
+                {receiptPreview && (
+                  <div className="relative w-16 h-16 rounded-md overflow-hidden border border-border">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={receiptPreview} alt="Чек" className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => { setReceiptPreview(""); setAiState("idle") }}
+                      className="absolute top-0.5 right-0.5 bg-black/50 rounded-full p-0.5 text-white hover:bg-black/70"
+                      aria-label="Удалить фото"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
 
                 {aiState === "loading" && slowTimeout && (
                   <p className="text-xs text-muted-foreground animate-pulse">
