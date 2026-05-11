@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { auth } from "@/auth"
 import { z } from "zod"
 import { Category, TransactionType } from "@prisma/client"
 
@@ -13,6 +14,9 @@ const createSchema = z.object({
 })
 
 export async function GET(req: NextRequest) {
+  const session = await auth()
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
   try {
     const { searchParams } = new URL(req.url)
     const category = searchParams.get("category")
@@ -23,7 +27,7 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get("limit") ?? "50")
     const offset = parseInt(searchParams.get("offset") ?? "0")
 
-    const where: Record<string, unknown> = {}
+    const where: Record<string, unknown> = { userId: session.user.id }
 
     if (category) {
       const cats = category.split(",").filter(Boolean)
@@ -38,12 +42,7 @@ export async function GET(req: NextRequest) {
     }
 
     const [items, total] = await Promise.all([
-      prisma.transaction.findMany({
-        where,
-        orderBy: { date: "desc" },
-        take: limit,
-        skip: offset,
-      }),
+      prisma.transaction.findMany({ where, orderBy: { date: "desc" }, take: limit, skip: offset }),
       prisma.transaction.count({ where }),
     ])
 
@@ -55,15 +54,15 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const session = await auth()
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
   try {
     const body = await req.json()
     const data = createSchema.parse(body)
 
     const tx = await prisma.transaction.create({
-      data: {
-        ...data,
-        date: new Date(data.date),
-      },
+      data: { ...data, date: new Date(data.date), userId: session.user.id },
     })
 
     return NextResponse.json(tx, { status: 201 })

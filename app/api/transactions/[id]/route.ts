@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { auth } from "@/auth"
 import { z } from "zod"
 import { Category, TransactionType } from "@prisma/client"
 
@@ -16,17 +17,17 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth()
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
   try {
     const { id } = await params
     const body = await req.json()
     const data = updateSchema.parse(body)
 
     const tx = await prisma.transaction.update({
-      where: { id },
-      data: {
-        ...data,
-        ...(data.date ? { date: new Date(data.date) } : {}),
-      },
+      where: { id, userId: session.user.id },
+      data: { ...data, ...(data.date ? { date: new Date(data.date) } : {}) },
     })
 
     return NextResponse.json(tx)
@@ -43,9 +44,12 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth()
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
   try {
     const { id } = await params
-    await prisma.transaction.delete({ where: { id } })
+    await prisma.transaction.delete({ where: { id, userId: session.user.id } })
     return NextResponse.json({ success: true })
   } catch (err) {
     console.error(err)

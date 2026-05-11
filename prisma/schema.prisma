@@ -25,6 +25,16 @@ enum TransactionType {
   income
 }
 
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  password     String
+  name         String?
+  createdAt    DateTime      @default(now())
+  transactions Transaction[]
+  settings     Settings?
+}
+
 model Transaction {
   id          String          @id @default(cuid())
   amount      Float
@@ -33,6 +43,8 @@ model Transaction {
   description String
   date        DateTime
   type        TransactionType
+  userId      String
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 }
@@ -42,6 +54,8 @@ model Settings {
   monthlyBudget Float    @default(1500)
   currency      String   @default("AZN")
   theme         String   @default("system")
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }

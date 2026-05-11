@@ -2,9 +2,10 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { LayoutDashboard, History, Lightbulb, Settings, TrendingUp } from "lucide-react"
+import { LayoutDashboard, History, Lightbulb, Settings, TrendingUp, LogOut } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ThemeToggle } from "@/components/shared/ThemeToggle"
+import { signOut, useSession } from "next-auth/react"
 
 const links = [
   { href: "/",          label: "Дашборд",    icon: LayoutDashboard },
@@ -15,6 +16,7 @@ const links = [
 
 export function Navigation() {
   const pathname = usePathname()
+  const { data: session } = useSession()
 
   return (
     <aside className="hidden md:flex flex-col w-56 shrink-0 border-r border-border bg-card h-screen sticky top-0">
@@ -47,7 +49,21 @@ export function Navigation() {
         })}
       </nav>
 
-      <div className="p-4 border-t border-border">
+      <div className="p-4 border-t border-border space-y-3">
+        {session?.user && (
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground truncate max-w-[120px]">
+              {session.user.name ?? session.user.email}
+            </span>
+            <button
+              onClick={() => signOut({ callbackUrl: "/login" })}
+              className="text-muted-foreground hover:text-destructive transition-colors"
+              aria-label="Выйти"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
+        )}
         <ThemeToggle />
       </div>
     </aside>

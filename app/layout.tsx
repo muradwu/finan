@@ -4,6 +4,7 @@ import "./globals.css"
 import { ThemeProvider } from "@/components/layout/theme-provider"
 import { Navigation } from "@/components/layout/Navigation"
 import { BottomNav } from "@/components/layout/BottomNav"
+import { SessionProvider } from "next-auth/react"
 import { Toaster } from "sonner"
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] })
@@ -34,19 +35,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} h-full`}
     >
       <body className="h-full antialiased">
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange={false}>
-          <div className="flex h-full min-h-screen">
-            <Navigation />
-            <main className="flex-1 min-w-0 flex flex-col pb-20 md:pb-0">
-              {children}
-            </main>
-          </div>
-          <BottomNav />
-          <Toaster
-            position="top-right"
-            toastOptions={{ style: { fontFamily: "var(--font-geist-sans)" } }}
-          />
-        </ThemeProvider>
+        <SessionProvider>
+          <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange={false}>
+            <div className="flex h-full min-h-screen">
+              <Navigation />
+              <main className="flex-1 min-w-0 flex flex-col pb-20 md:pb-0">
+                {children}
+              </main>
+            </div>
+            <BottomNav />
+            <Toaster
+              position="top-right"
+              toastOptions={{ style: { fontFamily: "var(--font-geist-sans)" } }}
+            />
+          </ThemeProvider>
+        </SessionProvider>
       </body>
     </html>
   )

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { auth } from "@/auth"
 import { z } from "zod"
 
 const updateSchema = z.object({
@@ -9,12 +10,14 @@ const updateSchema = z.object({
 })
 
 export async function GET() {
+  const session = await auth()
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
+  const userId = session.user.id
   try {
-    let settings = await prisma.settings.findFirst()
+    let settings = await prisma.settings.findUnique({ where: { userId } })
     if (!settings) {
-      settings = await prisma.settings.create({
-        data: { monthlyBudget: 1500, currency: "AZN", theme: "system" },
-      })
+      settings = await prisma.settings.create({ data: { userId, monthlyBudget: 1500, currency: "AZN", theme: "system" } })
     }
     return NextResponse.json(settings)
   } catch (err) {
@@ -24,21 +27,19 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
+  const session = await auth()
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
+  const userId = session.user.id
   try {
     const body = await req.json()
     const data = updateSchema.parse(body)
 
-    let settings = await prisma.settings.findFirst()
-    if (!settings) {
-      settings = await prisma.settings.create({
-        data: { monthlyBudget: 1500, currency: "AZN", theme: "system", ...data },
-      })
-    } else {
-      settings = await prisma.settings.update({
-        where: { id: settings.id },
-        data,
-      })
-    }
+    const settings = await prisma.settings.upsert({
+      where: { userId },
+      update: data,
+      create: { userId, monthlyBudget: 1500, currency: "AZN", theme: "system", ...data },
+    })
 
     return NextResponse.json(settings)
   } catch (err) {
@@ -51,8 +52,11 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE() {
+  const session = await auth()
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
   try {
-    await prisma.transaction.deleteMany()
+    await prisma.transaction.deleteMany({ where: { userId: session.user.id } })
     return NextResponse.json({ success: true })
   } catch (err) {
     console.error(err)

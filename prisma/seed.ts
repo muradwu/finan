@@ -1,4 +1,5 @@
 import { PrismaClient, Category, TransactionType } from "@prisma/client"
+import bcrypt from "bcryptjs"
 
 const prisma = new PrismaClient()
 
@@ -94,13 +95,20 @@ async function main() {
 
   await prisma.transaction.deleteMany()
   await prisma.settings.deleteMany()
+  await prisma.user.deleteMany()
 
-  await prisma.transaction.createMany({ data: transactions })
-
-  await prisma.settings.create({
-    data: { monthlyBudget: 1500, currency: "AZN", theme: "system" },
+  const password = await bcrypt.hash("demo1234", 12)
+  const user = await prisma.user.create({
+    data: { email: "demo@finan.app", password, name: "Demo" },
   })
 
+  await prisma.transaction.createMany({ data: transactions.map((t) => ({ ...t, userId: user.id })) })
+
+  await prisma.settings.create({
+    data: { userId: user.id, monthlyBudget: 1500, currency: "AZN", theme: "system" },
+  })
+
+  console.log(`✅ Created demo user: demo@finan.app / demo1234`)
   console.log(`✅ Created ${transactions.length} transactions`)
   console.log("✅ Created default settings (budget: 1500 AZN)")
 }
