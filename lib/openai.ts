@@ -61,6 +61,65 @@ export async function parseTransaction(text: string): Promise<{
   return JSON.parse(cleaned)
 }
 
+export async function parseReceiptImage(base64Image: string): Promise<{
+  amount: number
+  currency: string
+  category: string
+  description: string
+  date: string
+  type: "expense" | "income"
+}> {
+  const today = new Date().toISOString().split("T")[0]
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o",
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "image_url",
+            image_url: { url: `data:image/jpeg;base64,${base64Image}`, detail: "high" },
+          },
+          {
+            type: "text",
+            text: `Это фото чека или квитанции. Текст может быть на азербайджанском, русском или английском языке. Извлеки данные о покупке и верни ТОЛЬКО JSON без markdown и без пояснений.
+
+Сегодня: ${today}
+
+Формат ответа (строго JSON):
+{
+  "amount": number (итоговая сумма к оплате, только число),
+  "currency": "AZN" | "USD" | "EUR",
+  "category": "food"|"transport"|"housing"|"entertainment"|"health"|"work"|"subscriptions"|"shopping"|"education"|"other",
+  "description": "краткое описание на русском (магазин/заведение и что куплено)",
+  "date": "YYYY-MM-DD",
+  "type": "expense"
+}
+
+Правила:
+- amount = ищи слова: CƏMİ, CƏMI, YEKUN, TOTAL, ИТОГО, JƏMI — это итоговая сумма
+- Если сумма написана как "12.50" или "12,50" — это 12.50
+- Если валюта не ясна — "AZN" (Азербайджан)
+- Если дата не видна — ${today}
+- Кафе/ресторан/supermarket/market → food, aptek/аптека → health, geyim/одежда → shopping, taksi/такси → transport
+- description = название магазина/заведения + что куплено (на русском)
+- type всегда "expense"
+- Если не можешь прочитать сумму — используй наибольшее видимое число на чеке`,
+          },
+        ],
+      },
+    ],
+    max_tokens: 500,
+  })
+
+  const content = response.choices[0]?.message?.content ?? ""
+  const cleaned = content.replace(/```json?\n?/g, "").replace(/```/g, "").trim()
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) throw new Error(`No JSON in response: ${cleaned}`)
+  return JSON.parse(jsonMatch[0])
+}
+
 export async function generateInsights(data: {
   totalExpenses: number
   totalIncome: number
