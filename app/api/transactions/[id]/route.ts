@@ -49,7 +49,15 @@ export async function DELETE(
 
   try {
     const { id } = await params
+    const tx = await prisma.transaction.findUnique({ where: { id, userId: session.user.id } })
     await prisma.transaction.delete({ where: { id, userId: session.user.id } })
+    if (tx?.accountId) {
+      const delta = tx.type === "expense" ? tx.amount : -tx.amount
+      await prisma.account.update({
+        where: { id: tx.accountId },
+        data: { balance: { increment: delta } },
+      }).catch(() => {})
+    }
     return NextResponse.json({ success: true })
   } catch (err) {
     console.error(err)

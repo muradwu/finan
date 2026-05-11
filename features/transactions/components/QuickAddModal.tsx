@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { motion, AnimatePresence } from "framer-motion"
@@ -24,14 +24,26 @@ interface QuickAddModalProps {
 
 type ParsedData = TransactionFormValues & { _parsed?: boolean }
 
+interface Account { id: string; name: string; type: string }
+
 export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
   const [aiText, setAiText] = useState("")
   const [aiState, setAiState] = useState<"idle" | "loading" | "preview" | "error">("idle")
   const [parsed, setParsed] = useState<ParsedData | null>(null)
   const [originalText, setOriginalText] = useState("")
   const [slowTimeout, setSlowTimeout] = useState(false)
+  const [accounts, setAccounts] = useState<Account[]>([])
+  const [selectedAccountId, setSelectedAccountId] = useState<string>("")
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (open) {
+      fetch("/api/accounts").then((r) => r.json()).then((data) => {
+        if (Array.isArray(data)) setAccounts(data)
+      }).catch(() => {})
+    }
+  }, [open])
 
   const { register, handleSubmit, setValue, watch, reset, formState: { errors, isSubmitting } } = useForm<TransactionFormValues>({
     resolver: zodResolver(transactionSchema) as never,
@@ -93,7 +105,7 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
       const res = await fetch("/api/transactions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, ...(selectedAccountId ? { accountId: selectedAccountId } : {}) }),
       })
 
       if (!res.ok) throw new Error()
@@ -125,6 +137,7 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
     setAiState("idle")
     setParsed(null)
     setSlowTimeout(false)
+    setSelectedAccountId("")
     clearTimeout(timeoutRef.current)
     reset()
     onClose()
@@ -312,6 +325,23 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
                     <p id="date-error" className="text-xs text-destructive" role="alert">{errors.date.message}</p>
                   )}
                 </div>
+
+                {accounts.length > 0 && (
+                  <div className="space-y-1">
+                    <Label htmlFor="account-select">Счёт <span className="text-muted-foreground font-normal">(необязательно)</span></Label>
+                    <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+                      <SelectTrigger id="account-select">
+                        <SelectValue placeholder="Не указан" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Не указан</SelectItem>
+                        {accounts.map((acc) => (
+                          <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
 
                 <div className="flex gap-2 pt-2">
                   <Button type="button" variant="outline" onClick={handleClose} className="flex-1">

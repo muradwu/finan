@@ -25,14 +25,59 @@ enum TransactionType {
   income
 }
 
+enum AccountType {
+  checking
+  cash
+  deposit
+  credit_card
+}
+
+enum LiabilityType {
+  loan
+  mortgage
+  credit_card
+  other
+}
+
 model User {
-  id           String        @id @default(cuid())
-  email        String        @unique
+  id           String      @id @default(cuid())
+  email        String      @unique
   password     String
   name         String?
-  createdAt    DateTime      @default(now())
+  createdAt    DateTime    @default(now())
   transactions Transaction[]
+  accounts     Account[]
+  liabilities  Liability[]
   settings     Settings?
+}
+
+model Account {
+  id           String        @id @default(cuid())
+  name         String
+  type         AccountType
+  balance      Float         @default(0)
+  currency     String        @default("AZN")
+  color        String?
+  userId       String
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model Liability {
+  id             String        @id @default(cuid())
+  name           String
+  type           LiabilityType
+  totalAmount    Float
+  remaining      Float
+  currency       String        @default("AZN")
+  monthlyPayment Float?
+  interestRate   Float?
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 }
 
 model Transaction {
@@ -45,6 +90,8 @@ model Transaction {
   type        TransactionType
   userId      String
   user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId   String?
+  account     Account?        @relation(fields: [accountId], references: [id], onDelete: SetNull)
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 }

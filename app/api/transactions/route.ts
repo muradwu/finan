@@ -11,6 +11,7 @@ const createSchema = z.object({
   description: z.string().min(1),
   date: z.string(),
   type: z.nativeEnum(TransactionType),
+  accountId: z.string().optional(),
 })
 
 export async function GET(req: NextRequest) {
@@ -64,6 +65,14 @@ export async function POST(req: NextRequest) {
     const tx = await prisma.transaction.create({
       data: { ...data, date: new Date(data.date), userId: session.user.id },
     })
+
+    if (data.accountId) {
+      const delta = data.type === "expense" ? -data.amount : data.amount
+      await prisma.account.update({
+        where: { id: data.accountId, userId: session.user.id },
+        data: { balance: { increment: delta } },
+      })
+    }
 
     return NextResponse.json(tx, { status: 201 })
   } catch (err) {
