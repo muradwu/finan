@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { motion, AnimatePresence } from "framer-motion"
-import { Loader2, Sparkles, AlertCircle, Check, Camera, Pencil } from "lucide-react"
+import { Loader2, Sparkles, AlertCircle, Check, Camera, Pencil, Mic, MicOff, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -42,9 +42,13 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
   const [isAddingItems, setIsAddingItems] = useState(false)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [editDraft, setEditDraft] = useState({ description: "", amount: "", category: "" })
+  const [isRecording, setIsRecording] = useState(false)
+  const [isTranscribing, setIsTranscribing] = useState(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const inputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
 
   useEffect(() => {
     if (open) {
@@ -61,11 +65,10 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
 
   const watchedValues = watch()
 
-  const handleAIParse = async () => {
-    if (!aiText.trim()) return
+  const parseTextWithAI = async (text: string) => {
     setAiState("loading")
     setSlowTimeout(false)
-    setOriginalText(aiText)
+    setOriginalText(text)
 
     timeoutRef.current = setTimeout(() => setSlowTimeout(true), 3000)
     const abortTimeout = setTimeout(() => {
@@ -78,7 +81,7 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
       const res = await fetch("/api/transactions/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: aiText }),
+        body: JSON.stringify({ text }),
       })
 
       clearTimeout(timeoutRef.current)
@@ -107,6 +110,80 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
       clearTimeout(abortTimeout)
       setAiState("error")
     }
+  }
+
+  const handleAIParse = () => {
+    if (!aiText.trim()) return
+    parseTextWithAI(aiText)
+  }
+
+  const handleMicClick = async () => {
+    if (isRecording) {
+      mediaRecorderRef.current?.stop()
+      setIsRecording(false)
+      return
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      toast.error("Микрофон недоступен в этом браузере")
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4"
+      const recorder = new MediaRecorder(stream, { mimeType })
+      mediaRecorderRef.current = recorder
+      audioChunksRef.current = []
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop())
+        const blob = new Blob(audioChunksRef.current, { type: mimeType })
+        setIsTranscribing(true)
+        setAiState("loading")
+        try {
+          const formData = new FormData()
+          formData.append("audio", blob, `recording.${mimeType.includes("webm") ? "webm" : "mp4"}`)
+          const res = await fetch("/api/transactions/transcribe", { method: "POST", body: formData })
+          if (!res.ok) throw new Error()
+          const { text } = await res.json()
+          setAiText(text)
+          await parseTextWithAI(text)
+        } catch {
+          setAiState("error")
+          toast.error("Не удалось распознать речь. Попробуй снова.")
+        } finally {
+          setIsTranscribing(false)
+        }
+      }
+
+      recorder.start()
+      setIsRecording(true)
+
+      // Auto-stop after 60 seconds
+      setTimeout(() => {
+        if (mediaRecorderRef.current?.state === "recording") {
+          mediaRecorderRef.current.stop()
+          setIsRecording(false)
+        }
+      }, 60000)
+    } catch {
+      toast.error("Нет доступа к микрофону")
+    }
+  }
+
+  const addManualItem = () => {
+    if (!receiptData) return
+    const newItem = { description: "", amount: 0, category: "other" }
+    const newItems = [...receiptData.items, newItem]
+    setReceiptData({ ...receiptData, items: newItems })
+    setSelectedItems(prev => [...prev, true])
+    setEditDraft({ description: "", amount: "", category: "other" })
+    setEditingIndex(newItems.length - 1)
   }
 
   const handleReceiptPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -268,6 +345,9 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
     setReceiptData(null)
     setSelectedItems([])
     setEditingIndex(null)
+    setIsRecording(false)
+    setIsTranscribing(false)
+    if (mediaRecorderRef.current?.state === "recording") mediaRecorderRef.current.stop()
     clearTimeout(timeoutRef.current)
     reset()
     onClose()
@@ -342,8 +422,21 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
                   <Button
                     type="button"
                     variant="outline"
+                    onClick={handleMicClick}
+                    disabled={aiState === "loading" && !isRecording}
+                    className={`shrink-0 ${isRecording ? "text-destructive border-destructive animate-pulse" : ""}`}
+                    aria-label={isRecording ? "Остановить запись" : "Голосовой ввод"}
+                  >
+                    {isRecording
+                      ? <MicOff className="h-4 w-4" aria-hidden="true" />
+                      : <Mic className="h-4 w-4" aria-hidden="true" />
+                    }
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={aiState === "loading"}
+                    disabled={aiState === "loading" || isRecording}
                     className="shrink-0"
                     aria-label="Сфотографировать чек"
                   >
@@ -356,11 +449,11 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
                   <Button
                     type="button"
                     onClick={handleAIParse}
-                    disabled={!aiText.trim() || aiState === "loading"}
+                    disabled={!aiText.trim() || aiState === "loading" || isRecording}
                     className="shrink-0"
                     aria-label="Обработать AI"
                   >
-                    {aiState === "loading" && !receiptLoading ? (
+                    {aiState === "loading" && !receiptLoading && !isTranscribing ? (
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                     ) : (
                       <Sparkles className="h-4 w-4" aria-hidden="true" />
@@ -368,12 +461,25 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
                   </Button>
                 </div>
                 <p id="ai-hint" className="text-xs text-muted-foreground">
-                  Напиши или сфотографируй чек — AI распознает расходы
+                  Напиши, надиктуй или сфотографируй чек — AI распознает расходы
                 </p>
 
-                {aiState === "loading" && slowTimeout && (
+                {isRecording && (
+                  <p className="text-xs text-destructive font-medium animate-pulse flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-destructive inline-block" />
+                    Запись... Нажми ещё раз чтобы остановить
+                  </p>
+                )}
+
+                {isTranscribing && (
                   <p className="text-xs text-muted-foreground animate-pulse">
-                    Анализируем чек, это может занять несколько секунд...
+                    Распознаём речь...
+                  </p>
+                )}
+
+                {aiState === "loading" && slowTimeout && !isRecording && !isTranscribing && (
+                  <p className="text-xs text-muted-foreground animate-pulse">
+                    Анализируем, это может занять несколько секунд...
                   </p>
                 )}
 
@@ -526,6 +632,16 @@ export function QuickAddModal({ open, onClose }: QuickAddModalProps) {
                     </div>
                   ))}
                 </div>
+
+                {/* Add manual item */}
+                <button
+                  type="button"
+                  onClick={addManualItem}
+                  className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors px-0.5"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Добавить позицию вручную
+                </button>
 
                 {/* Summary row */}
                 <div className="flex items-center justify-between px-1 py-1.5 border-t text-sm">
