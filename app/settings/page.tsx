@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react"
 import { useTheme } from "next-themes"
+import { signOut, useSession } from "next-auth/react"
 import { toast } from "sonner"
-import { Download, FileText, Trash2, Moon, Sun, Monitor, Loader2 } from "lucide-react"
+import { Download, FileText, Trash2, Moon, Sun, Monitor, Loader2, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -29,6 +30,7 @@ export default function SettingsPage() {
   const [exportingCsv, setExportingCsv] = useState(false)
   const [exportingPdf, setExportingPdf] = useState(false)
   const { theme, setTheme } = useTheme()
+  const { data: session } = useSession()
 
   useEffect(() => {
     fetch("/api/settings")
@@ -280,6 +282,22 @@ export default function SettingsPage() {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
+          </section>
+
+          {/* Account */}
+          <section className="rounded-2xl border border-border bg-card p-6 space-y-4">
+            <h2 className="text-base font-semibold">Аккаунт</h2>
+            <p className="text-sm text-muted-foreground">
+              Вы вошли как <span className="text-foreground font-medium">{session?.user?.email}</span>
+            </p>
+            <Button
+              variant="outline"
+              className="gap-2 text-destructive hover:text-destructive hover:border-destructive"
+              onClick={() => signOut({ callbackUrl: "/login" })}
+            >
+              <LogOut className="h-4 w-4" aria-hidden="true" />
+              Выйти из аккаунта
+            </Button>
           </section>
 
           {/* Seed for demo */}
