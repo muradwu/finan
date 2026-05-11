@@ -18,6 +18,16 @@ const instrumentSerif = Instrument_Serif({
 export const metadata: Metadata = {
   title: "Finan — AI Трекер Финансов",
   description: "Персональный AI-трекер финансов. Добавляй транзакции за 5 секунд.",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Finan",
+  },
+  other: {
+    "mobile-web-app-capable": "yes",
+    "msapplication-TileColor": "#16a34a",
+  },
 }
 
 export const viewport: Viewport = {
